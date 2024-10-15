@@ -30,7 +30,7 @@ float yawOffset = 0;
 
 int selectedValue = 0;
 
-// Kalman Filter 객체 생성 (측정 불확실성, 프로세스 불확실성, 측정 잡음)
+// Kalman Filter 객체 생성 (측정 불확실성, 프로세스 불확실성, 측정 잡음) kalman filter 수정 필요
 SimpleKalmanFilter rollKalmanFilter(2, 2, 0.01);
 SimpleKalmanFilter pitchKalmanFilter(2, 2, 0.01);
 SimpleKalmanFilter yawKalmanFilter(2, 2, 0.01);
