@@ -7,32 +7,62 @@
 #include <freertos/task.h>
 #include <Ticker.h>
 
+// MPU9250, LCD, Bluetooth 객체 생성
 MPU9250 mpu;
 LCDI2C_Symbols lcd(0x27, 16, 2);
 BluetoothSerial SerialBT;
 
+// 핀 설정 및 변수 초기화
 int ledPin = 2;
 int selectButtonPin = 15, zeroButtonPin = 4;
 int lastSelectButtonState = HIGH, lastZeroButtonState = HIGH;
 unsigned long lastDebounceTime = 0, debounceDelay = 50;
-
-float rollOffset = 0, pitchOffset = 0, yawOffset = 0;
-int selectedValue = 0, pwmValue = 0;
+int pwmValue = 0;
 bool increasing = true;
 
+float rollOffset = 0, pitchOffset = 0, yawOffset = 0;
+int selectedValue = 0;
+
+// Kalman 필터 객체 생성
 SimpleKalmanFilter rollKalmanFilter(2, 2, 0.01);
 SimpleKalmanFilter pitchKalmanFilter(2, 2, 0.01);
 SimpleKalmanFilter yawKalmanFilter(2, 2, 0.01);
 
+// 필터 가중치 설정 (상보 필터용)
+float alpha = 0.98;
+
+// 이동 평균 필터용 변수
+const int windowSize = 5;
+float rollWindow[windowSize] = {0}, pitchWindow[windowSize] = {0}, yawWindow[windowSize] = {0};
+int windowIndex = 0;
+float rollSum = 0, pitchSum = 0, yawSum = 0;
+
+// FreeRTOS 태스크 핸들
 TaskHandle_t imuTaskHandle = NULL, lcdTaskHandle = NULL, ledTaskHandle = NULL;
 Ticker ticker;
 
+// 상보 필터 함수
+float complementaryFilter(float gyro, float accel, float dt) {
+  return alpha * (gyro * dt) + (1 - alpha) * accel;
+}
+
+// 이동 평균 필터 함수
+float movingAverageFilter(float *window, float *sum, float newValue) {
+  *sum -= window[windowIndex]; // 기존 값을 합에서 제외
+  window[windowIndex] = newValue; // 새로운 값을 창에 추가
+  *sum += newValue; // 합에 새로운 값 추가
+  windowIndex = (windowIndex + 1) % windowSize; // 창의 인덱스 갱신
+  return *sum / windowSize; // 창 안의 값의 평균 반환
+}
+
+// FreeRTOS 태스크를 깨우는 함수
 void wakeUpTasks() {
   if (imuTaskHandle != NULL) xTaskNotifyGive(imuTaskHandle);
   if (lcdTaskHandle != NULL) xTaskNotifyGive(lcdTaskHandle);
   if (ledTaskHandle != NULL) xTaskNotifyGive(ledTaskHandle);
 }
 
+// 스위치 처리 함수
 void handleSwitches() {
   int selectReading = digitalRead(selectButtonPin);
   int zeroReading = digitalRead(zeroButtonPin);
@@ -55,19 +85,33 @@ void handleSwitches() {
   lastZeroButtonState = zeroReading;
 }
 
+// IMU 데이터 읽기 및 필터 적용 함수
 void readIMUData() {
   if (mpu.update()) {
-    float roll = rollKalmanFilter.updateEstimate(mpu.getRoll()) - rollOffset;
-    float pitch = pitchKalmanFilter.updateEstimate(mpu.getPitch()) - pitchOffset;
-    float yaw = yawKalmanFilter.updateEstimate(mpu.getYaw()) - yawOffset;
+    float dt = 0.01; // 적절한 시간 차이로 설정
 
-    Serial.printf("Roll: %.2f, Pitch: %.2f, Yaw: %.2f\n", roll, pitch, yaw);
-    SerialBT.printf("Roll: %.2f, Pitch: %.2f, Yaw: %.2f\n", roll, pitch, yaw);
+    // 자이로 및 가속도 데이터를 사용하여 보정된 롤, 피치, 요 값을 계산
+    float gyroRoll = mpu.getGyroX();
+    float accelRoll = mpu.getAccX(); 
+    float complementaryRoll = complementaryFilter(gyroRoll, accelRoll, dt);
+
+    float gyroPitch = mpu.getGyroY();
+    float accelPitch = mpu.getAccY();
+    float complementaryPitch = complementaryFilter(gyroPitch, accelPitch, dt);
+
+    float gyroYaw = mpu.getGyroZ();
+    float accelYaw = mpu.getAccZ(); // 주의: 실제로는 요 값은 자이로에서만 사용 가능
+    float complementaryYaw = complementaryFilter(gyroYaw, accelYaw, dt);
+
+    Serial.printf("Roll: %.2f, Pitch: %.2f, Yaw: %.2f\n", complementaryRoll, complementaryPitch, complementaryYaw);
+    SerialBT.printf("Roll: %.2f, Pitch: %.2f, Yaw: %.2f\n", complementaryRoll, complementaryPitch, complementaryYaw);
   } else {
     Serial.println("IMU Update Failed");
   }
 }
 
+
+// LCD 업데이트 함수
 void updateLCD() {
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -83,6 +127,7 @@ void updateLCD() {
   lcd.print(pwmValue);
 }
 
+// LED 업데이트 함수
 void updateLED() {
   if (increasing) {
     pwmValue += 5;
@@ -102,6 +147,7 @@ void updateLED() {
   SerialBT.printf("PWM Value: %d\n", pwmValue);
 }
 
+// IMU 태스크 함수
 void imuTask(void *pvParameters) {
   while (1) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -109,6 +155,7 @@ void imuTask(void *pvParameters) {
   }
 }
 
+// LCD 태스크 함수
 void lcdTask(void *pvParameters) {
   while (1) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -116,6 +163,7 @@ void lcdTask(void *pvParameters) {
   }
 }
 
+// LED 태스크 함수
 void ledTask(void *pvParameters) {
   while (1) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -123,6 +171,7 @@ void ledTask(void *pvParameters) {
   }
 }
 
+// setup 함수
 void setup() {
   Serial.begin(115200);
   Wire.begin();
@@ -143,6 +192,7 @@ void setup() {
   ticker.attach_ms(40, wakeUpTasks);
 }
 
+// loop 함수
 void loop() {
   handleSwitches();
 }
