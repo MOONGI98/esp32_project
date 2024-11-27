@@ -7,6 +7,10 @@
 #include "BluetoothSerial.h"
 #include <SimpleKalmanFilter.h>
 
+// Bluetoonth 영점 조절 제어 전역변수 11/24 
+String received_command = "R";    
+
+
 MPU9250 mpu;
 LCDI2C_Symbols lcd(0x27, 16, 2);
 
@@ -101,9 +105,9 @@ void imuTask(void *pvParameters) {
       Serial.print(", Pitch: "); Serial.print(filteredPitch, 2);
       Serial.print(", Yaw: "); Serial.println(filteredYaw, 2);
 
-      SerialBT.print("Roll: "); SerialBT.print(filteredRoll, 2);
-      SerialBT.print(", Pitch: "); SerialBT.print(filteredPitch, 2);
-      SerialBT.print(", Yaw: "); SerialBT.println(filteredYaw, 2);
+      SerialBT.print("Roll: "); SerialBT.print(filteredRoll, 2); SerialBT.println("");
+      SerialBT.print(", Pitch: "); SerialBT.print(filteredPitch, 2); SerialBT.println("");
+      SerialBT.print(", Yaw: "); SerialBT.println(filteredYaw, 2); SerialBT.println("");
     } else {
       Serial.println("IMU Update Failed");
     }
@@ -188,4 +192,20 @@ void setup() {
 
 void loop() {
   handleSwitches();
+
+   // Bluetooth 모니터에 명령줄을 입력할 때 11.24
+  if (SerialBT.available()) {
+    received_command = SerialBT.readStringUntil('\n');
+    received_command.trim();  // 공백제거 
+    Serial.println("블루투스 모니터에 입력한 command: " + received_command); //Serial 모니터에서 확인가능
+  }
+  // command 값이 R일 때 Offset 값이 들어가야 하는 부분  11.24
+  if (received_command == "R") {
+    rollOffset = mpu.getRoll(); 
+    pitchOffset = mpu.getPitch(); // 
+    yawOffset = mpu.getYaw(); // 
+    SerialBT.println("Reset Completed");
+    received_command = "";  // command 리셋
+  }
+
 }
