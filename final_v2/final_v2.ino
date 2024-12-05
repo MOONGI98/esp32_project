@@ -8,7 +8,8 @@
 #include <SimpleKalmanFilter.h>
 
 // Bluetoonth 영점 조절 제어 전역변수 11/24 
-String received_command = "R";    
+String received_command = "";
+
 
 
 MPU9250 mpu;
@@ -184,8 +185,8 @@ void setup() {
   SerialBT.begin("ESP32_BT");
 
   xTaskCreate(imuTask, "IMU Task", 2048, NULL, 1, &imuTaskHandle);
-  xTaskCreate(lcdTask, "LCD Task", 2048, NULL, 2, &lcdTaskHandle);
-  xTaskCreate(ledTask, "LED Task", 2048, NULL, 3, &ledTaskHandle);
+  xTaskCreate(lcdTask, "LCD Task", 2048, NULL, 1, &lcdTaskHandle);
+  xTaskCreate(ledTask, "LED Task", 2048, NULL, 1, &ledTaskHandle);
 
   ticker.attach_ms(40, wakeUpTasks);
 }
@@ -193,19 +194,30 @@ void setup() {
 void loop() {
   handleSwitches();
 
-   // Bluetooth 모니터에 명령줄을 입력할 때 11.24
+  // Bluetooth 모니터에 명령줄을 입력할 때
   if (SerialBT.available()) {
     received_command = SerialBT.readStringUntil('\n');
     received_command.trim();  // 공백제거 
     Serial.println("블루투스 모니터에 입력한 command: " + received_command); //Serial 모니터에서 확인가능
   }
-  // command 값이 R일 때 Offset 값이 들어가야 하는 부분  11.24
+
+  // command 값에 따라 Offset 값 리셋
   if (received_command == "R") {
     rollOffset = mpu.getRoll(); 
-    pitchOffset = mpu.getPitch(); // 
-    yawOffset = mpu.getYaw(); // 
-    SerialBT.println("Reset Completed");
+    SerialBT.println("Roll Offset Reset Completed");
+    Serial.println("Roll Offset Reset Completed");
+    received_command = "";  // command 리셋
+  } 
+  else if (received_command == "P") {
+    pitchOffset = mpu.getPitch();
+    SerialBT.println("Pitch Offset Reset Completed");
+    Serial.println("Pitch Offset Reset Completed");
+    received_command = "";  // command 리셋
+  } 
+  else if (received_command == "Y") {
+    yawOffset = mpu.getYaw();
+    SerialBT.println("Yaw Offset Reset Completed");
+    Serial.println("Yaw Offset Reset Completed");
     received_command = "";  // command 리셋
   }
-
 }
